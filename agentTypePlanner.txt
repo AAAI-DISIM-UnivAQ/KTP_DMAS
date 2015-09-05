@@ -1,0 +1,75 @@
+:- use_module('webutil.pl'),
+   use_module(library(sockets)),
+   use_module(library(random3)),
+   use_module(library(lists)).
+
+:-dynamic current_identifier/1.
+:-dynamic current_size/1.
+:-dynamic current_forbidden/2.
+:-dynamic trivial_reached/2.
+
+net_ip(localhost).
+net_port(3333).
+
+open_web_socket(Stream):- net_ip(IP), net_port(PORT), socket_client_open(IP:PORT, Stream, [type(text)]).
+close_web_socket(Stream):- close(Stream).
+
+sendData(X) :- agent(M), open_web_socket(Stream),
+               write(Stream,M), write(Stream,'_.._'),
+               current_identifier(Identifier),
+               write(Stream,Identifier), write(Stream,'_.._'),
+               write(Stream,X),
+               close_web_socket(Stream).
+sendData(X, Y) :- agent(M), open_web_socket(Stream),
+               write(Stream,M), write(Stream,'_.._'),
+               current_identifier(Identifier),
+               write(Stream,Identifier), write(Stream,'_.._'),
+               write(Stream,X), write(Stream,'_.._'),
+               write(Stream,Y),
+               close_web_socket(Stream).
+
+
+row_col(X) :- current_size(S), N is S+1, X > 0, X < N.
+cell(X,Y) :- row_col(X), row_col(Y).
+
+send_trivial_path:- agent(M), open_web_socket(Stream),
+           write(Stream,M), write(Stream,'_.._'),
+           current_identifier(Identifier),
+           write(Stream,Identifier), write(Stream,'_.._'),
+           write(Stream,'path'), write(Stream,'_.._'),
+           write(Stream, '{"path":['),
+           format(Stream, '{"x":"~d","y":"~d"}', [1, 1]),
+           trivial_next(1,1, Stream),
+           retractall(trivial_reached(_,_)),
+           write(Stream, ']}'), 
+           close_web_socket(Stream).
+
+
+new_forbiddens_to_saveE:- retractall(current_forbidden(_,_)).
+
+forbidden_to_saveE(X,Y):- assert(current_forbidden(X,Y)).
+
+start_searchE(ID,N,T):- write('Problema: '),write(T),retractall(current_size(_)), assert(current_size(N)), retractall(current_identifier(_)), assert(current_identifier(ID)), findall(current_forbidden(X,Y), current_forbidden(X,Y), LIST), write(LIST),nl,sendData(T). 
+
+start_trivial_searchE:- send_trivial_path.
+
+trivial_next(X,Y, Stream):- trivial_search_next(X,Y,L), shuffle(L, LShuffle), trivial_select_next(LShuffle,X1,Y1), assert(trivial_reached(X1,Y1)), format(Stream, ',{"x":"~d","y":"~d"}', [X1, Y1]), trivial_next(X1,Y1, Stream).
+trivial_next(X,Y, Stream):-true.
+
+trivial_search_next(X,Y,[
+                trivial_move(X1,Y1), trivial_move(X2,Y2), trivial_move(X3,Y3), trivial_move(X4,Y4),
+                trivial_move(X5,Y5), trivial_move(X6,Y6), trivial_move(X7,Y7), trivial_move(X8,Y8)
+                        ]):-
+                X1 is X+1, Y1 is Y+2, X2 is X+2, Y2 is Y+1, X3 is X+1, Y3 is Y-2,
+                X4 is X+2, Y4 is Y-1, X5 is X-1, Y5 is Y-2, X6 is X-2, Y6 is Y-1,
+                X7 is X-1, Y7 is Y+2, X8 is X-2, Y8 is Y+1.
+
+trivial_select_next([trivial_move(X1,Y1)|_T], X1,Y1):- cell(X1,Y1),
+				 not(current_forbidden(X1,Y1)),
+				 not(trivial_reached(X1,Y1)).
+trivial_select_next([_H|T], X1,Y1):- trivial_select_next(T, X1,Y1).
+
+shuffle(InList, OutList) :- length(InList,N), randseq(N, N, X), 
+                shuffling(X, InList, OutList).
+shuffling([],_,[]):-true.
+shuffling([H|T],InList,[V|T2]):- nth1(H, InList, V), shuffling(T, InList, T2).

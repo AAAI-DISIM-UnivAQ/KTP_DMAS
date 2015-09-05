@@ -1,0 +1,108 @@
+:- use_module('webutil.pl'),
+   use_module(library(sockets)),
+   use_module(library(random3)),
+   use_module(library(lists)).
+
+:-dynamic current_identifier/1.
+:-dynamic current_size/1.
+:-dynamic current_forbidden/2.
+:-dynamic system_state/1.
+:-dynamic number_of_forbidden/1.
+:-dynamic move_to_evaluate/4.
+
+
+system_state(0).
+
+net_ip(localhost).
+net_port(3333).
+
+open_web_socket(Stream):- net_ip(IP), net_port(PORT), socket_client_open(IP:PORT, Stream, [type(text)]).
+close_web_socket(Stream):- close(Stream).
+
+ack:- agent(M), open_web_socket(Stream),
+                write(Stream,M), write(Stream,'_.._'),
+                current_identifier(Identifier),
+                write(Stream,Identifier),
+                close_web_socket(Stream).
+
+sendData(X) :- agent(M), open_web_socket(Stream),
+               write(Stream,M), write(Stream,'_.._'),
+               current_identifier(Identifier),
+               write(Stream,Identifier), write(Stream,'_.._'),
+               write(Stream,X),
+               close_web_socket(Stream).
+sendData(X, Y) :- agent(M), open_web_socket(Stream),
+               write(Stream,M), write(Stream,'_.._'),
+               current_identifier(Identifier),
+               write(Stream,Identifier), write(Stream,'_.._'),
+               write(Stream,X), write(Stream,'_.._'),
+               write(Stream,Y),
+               close_web_socket(Stream).
+
+   
+save_forbidden([]).
+save_forbidden([X|[Y|T]]):- assert(current_forbidden(X,Y)), save_forbidden(T).
+
+save_moves([], []).
+save_moves([X1|[Y1|[X2|[Y2|T]]]],[move(X1,Y1, X2, Y2)|M]):- save_moves(T,M).
+save_moves(Moves, FunctorMoves):-true.
+
+normalize_int(X,StrX):- name(X,L), name(StrX,L).
+
+next_stateE:- next_state.
+
+next_state:- system_state(S), retractall(system_state(_)), S1 is S+1, assert(system_state(S1)), write('Agent state: '), write(S1), nl, normalize_int(S1,StrX), sendData('as',StrX).
+
+prev_state:- system_state(0).
+prev_state:- system_state(S), retractall(system_state(_)), S1 is S-1, assert(system_state(S1)).
+
+reset_state:- write('reset'),retractall(system_state(_)), assert(system_state(0)), sendData('rs').
+
+
+
+save_forbidden_of_problem([X1|[Y1|T]]):- assert(current_forbidden(X1,Y1)), number_of_forbidden(S), retractall(number_of_forbidden(_)), S1 is S-1, assert(number_of_forbidden(S1)).
+
+new_connectionE(Identifier):> write(Identifier),nl, retractall(current_identifier(_)), assert(current_identifier(Identifier)), reset_state, ack.
+
+instanceReadyE(Size,NumberOfForbidden):> write('Size of the problem'), write(Size), nl, 
+					   retractall(current_size(_)), assert(current_size(Size)),
+					   retractall(current_forbidden(_,_)), 
+					   retractall(number_of_forbidden(_)), assert(number_of_forbidden(NumberOfForbidden)),
+					   next_state,
+					   sendData('pr'), write('Instance received'), nl.
+
+
+
+is_instance_ready:-system_state(1), number_of_forbidden(0).
+is_instance_readyI:> nl, next_state, write(is_instance_ready), nl, run_asp_solver_actionA.
+
+can_start_solver:-run_asp_solver_actionP, system_state(2).
+can_start_solverI:> next_state, write('Activate MetaPlanner '), nl, send_forbidden.
+
+
+
+send_forbidden:- findall(current_forbidden(X1,Y1),current_forbidden(X1,Y1),List), messageA(agMetaPlanner,send_message(new_forbiddens_to_save, agCoordinator)), write(List),send_forbidden_to_save(List).
+
+send_forbidden_to_save([]):- launch_instance.
+send_forbidden_to_save([current_forbidden(X1,Y1)|T]):- messageA(agMetaPlanner,send_message(forbidden_to_save(X1,Y1), agCoordinator)), send_forbidden_to_save(T). 
+
+launch_instance:- current_size(Size), current_identifier(ID), messageA(agMetaPlanner, send_message(find_plan(Size,ID),agCoordinator)).
+
+forbidden_of_problemE(Forbidden):- save_forbidden_of_problem(Forbidden), write(.).
+
+
+
+evaluation_completedE:- write('Received plan'), nl, retractall(move_to_evaluate(_,_,_,_)).
+
+response_moveE(X1,Y1,X2,Y2):- assert(move_to_evaluate(X1,Y1,X2,Y2)).
+
+response_trivial_evaluationE:- findall(move_to_evaluate(X1,Y1,X2,Y2),move_to_evaluate(X1,Y1,X2,Y2),List), send_current_identifier(List).
+
+
+
+send_current_identifier(List):- current_identifier(ID), messageA(agExplorer, send_message(send_current_identifier(ID),agCoordinator)), send_move_to_start(List).
+
+send_move_to_start([]):- write('Activate Explorer'), nl, messageA(agExplorer, send_message(sendPathToExplore,agCoordinator)).
+send_move_to_start([move_to_evaluate(X1,Y1,X2,Y2)|T]):- messageA(agExplorer, send_message(send_move_to_start(X1,Y1,X2,Y2),agCoordinator)), send_move_to_start(T).
+
+
